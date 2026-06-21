@@ -1,0 +1,23 @@
+[project]
+name = "proofstruct-tools"
+version = "0.2.0"
+description = "Python tooling for ProofStruct proof blueprint extraction and English generation"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "openai>=2.43",
+  "orjson>=3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.5",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = [".lake", "output"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,9 @@
+[llm]
+provider = "tencent_tokenhub"
+model = "deepseek-v4-pro-202606"
+base_url = "https://tokenhub.tencentmaas.com/v1"
+api_key_env = "PROOFSTRUCT_LLM_API_KEY"
+api_key = ""
+timeout_seconds = 120
+max_completion_tokens = 4096
+temperature = 0.1

@@ -1,0 +1,33 @@
+# Lean and Python build artifacts
+.lake/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Generated ProofStruct artifacts
+output/
+docs/
+
+# Local LLM configuration and secrets
+proofstruct_config.toml
+.env*
+*.key
+*.pem
+
+# Local Codex state that may coexist in this directory
+auth.json
+config.toml
+installation_id
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+log/
+shell_snapshots/
+skills/
+tmp/
+.tmp/
+
+# OS/editor files
+.DS_Store

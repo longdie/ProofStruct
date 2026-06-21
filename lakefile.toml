@@ -1,0 +1,27 @@
+name = "ProofStruct"
+version = "0.2.0"
+defaultTargets = ["ProofStruct"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+pp.unicode.fun = true
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+rev = "b2958bc1a0e2db353d06d6c019cd3f8bb8a1163c"
+
+[[lean_lib]]
+name = "ProofStruct"
+roots = ["ProofStruct"]
+
+[[lean_exe]]
+name = "extract_blueprint"
+root = "ProofStruct.Main"
+supportInterpreter = true
+
+[[lean_exe]]
+name = "extract_layered_blueprint"
+root = "ProofStruct.LayeredMain"
+supportInterpreter = true
