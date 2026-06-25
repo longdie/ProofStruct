@@ -25,3 +25,8 @@ supportInterpreter = true
 name = "extract_layered_blueprint"
 root = "ProofStruct.LayeredMain"
 supportInterpreter = true
+
+[[lean_exe]]
+name = "extract_file_blueprints"
+root = "ProofStruct.FileMain"
+supportInterpreter = true

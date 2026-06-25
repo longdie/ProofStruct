@@ -50,15 +50,9 @@ lake update
 lake build ProofStruct
 ```
 
-## 快速开始：复现 example.lean
+## 快速开始
 
-仓库中提供了示例文件：
-
-```text
-examples/example.lean
-```
-
-在终端生成形式化证明蓝图 JSON。默认命令不需要 API key：
+为示例文件生成形式化证明蓝图 JSON：
 
 ```bash
 conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_extract.py \
@@ -66,26 +60,28 @@ conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_ex
   --file examples/example.lean
 ```
 
-然后用 VS Code 和 Lean extension 打开 [examples/example.lean](examples/example.lean)。该文件已经
-导入 ProofStruct，并包含类似命令：
+然后用 VS Code 和 Lean extension 打开 [examples/example.lean](examples/example.lean)。示例文件中包含
+一个 lemma、两个 theorem，以及 Infoview 命令：
 
 ```lean
-#proof_blueprint fermat_little_theorem_1
+#proof_blueprint demo_fermat
 ```
 
-当对应 JSON 已经生成后，Lean Infoview 会展示该 theorem 的证明蓝图。如果还需要可选的英文显示层，
-见 [可选英文证明蓝图](#可选英文证明蓝图)。
+把光标放到该命令上，即可在 Infoview 中查看证明蓝图。
 
-## 生成证明蓝图
+## 两种证明蓝图构建方式
 
-推荐默认使用 Python 批处理，一次处理完整 Lean 文件。默认情况下，ProofStruct 只生成形式化 Lean
-蓝图文件：
+### 推荐方式：终端批处理
+
+默认工作流是在终端生成 JSON，然后由 Infoview 读取生成文件：
 
 ```bash
 conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_extract.py \
   --project-root . \
   --file examples/example.lean
 ```
+
+这是正常使用时的推荐方式，因为它不会在 VS Code Lean server 中运行证明蓝图提取。
 
 如果只想处理单个声明：
 
@@ -93,63 +89,56 @@ conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_ex
 conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_extract.py \
   --project-root . \
   --file examples/example.lean \
-  --theorem fermat_little_theorem_1
+  --theorem demo_fermat
 ```
 
-如果在其他 Lean 项目中使用 ProofStruct，请在目标项目根目录运行：
+### 可选方式：Lean 中显式即时生成
 
-```bash
-conda run --no-capture-output -n proofstruct python /absolute/path/to/ProofStruct/scripts/ProofStruct/batch_extract.py \
-  --project-root . \
-  --file MyProject/MyFile.lean
-```
-
-默认输出结构为：
-
-```text
-output/<file-stem>/<declaration-name>/manifest.json
-output/<file-stem>/<declaration-name>/<source-hash>/formal.evidence.json
-output/<file-stem>/<declaration-name>/<source-hash>/formal.layered.json
-```
-
-`<source-hash>` 是 normalized declaration source block 的 SHA-256 hash 前 16 位。如果 theorem
-陈述或证明发生变化，hash 也会变化。因此即使 theorem 名字不变，`#proof_blueprint` 也不会误用旧蓝图。
-
-这个默认流程已经足够用于 Infoview 可视化。它不会调用大模型，也不需要
-`proofstruct_config.toml` 或 API key。
-
-## Infoview 使用
-
-在 Lean 文件中导入 ProofStruct，并在声明之后调用命令：
+ProofStruct 也提供显式 bang 命令：
 
 ```lean
-import ProofStruct
-
-theorem my_theorem : True := by
-  trivial
-
-#proof_blueprint my_theorem
+#proof_blueprint! demo_fermat
+#proof_blueprint_english! demo_fermat
 ```
 
-`#proof_blueprint` 会读取：
+这两个命令会从 Lean 中调用 Python 批处理脚本，并启用安全检查。它们适合临时生成某个缺失的小蓝图。
 
-```text
-output/<file-stem>/<declaration-name>/manifest.json
+即时生成会在运行期间阻塞 Lean command elaboration。对于包含 Mathlib 的项目，建议机器内存大于
+24GB 再使用 `#proof_blueprint!` 或 `#proof_blueprint_english!`。不建议并行运行多个蓝图提取任务。
+
+即时命令需要能找到 Python executable。可以设置 `PROOFSTRUCT_PYTHON`，也可以在本地
+`proofstruct_config.toml` 中配置：
+
+```toml
+[python]
+executable = "/absolute/path/to/python"
 ```
 
-然后抽取当前声明源码块，与 manifest 中的 `normalized_source` 匹配，再加载：
+`proofstruct_config.toml` 是本地配置，不应该提交到 GitHub。
 
-```text
-output/<file-stem>/<declaration-name>/<source-hash>/formal.layered.json
+## Infoview 命令
+
+```lean
+#proof_blueprint theorem_name
 ```
 
-如果当前源码和 manifest 不匹配，命令会报错并提示重新运行批处理脚本，而不会自动读取旧 hash
-目录中的蓝图。
+读取已有 JSON 并显示蓝图。它永远不会自动生成缺失 JSON。
+
+```lean
+#proof_blueprint! theorem_name
+```
+
+如果当前源码 hash 缺少 formal 蓝图，则生成 formal 蓝图，然后显示。
+
+```lean
+#proof_blueprint_english! theorem_name
+```
+
+先确保 formal 蓝图存在，再在需要时生成 English 蓝图，最后显示 Formal/English 视图。
 
 ## 可选英文证明蓝图
 
-ProofStruct 可以在形式化 Lean 蓝图之外，可选生成英文显示层。这个功能默认关闭，因为它需要
-OpenAI-compatible LLM endpoint。只需要形式化 Lean 蓝图的用户可以完全跳过本节。
+English 蓝图需要 OpenAI-compatible LLM endpoint。
 
 创建本地配置文件：
 
@@ -163,7 +152,7 @@ cp proofstruct_config.example.toml proofstruct_config.toml
 export PROOFSTRUCT_LLM_API_KEY=<your-api-key>
 ```
 
-添加 `--english` 即可同时生成形式化蓝图和英文蓝图：
+在终端同时生成 formal 和 English 蓝图：
 
 ```bash
 conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_extract.py \
@@ -172,14 +161,47 @@ conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_ex
   --english
 ```
 
-生成的英文 JSON 与形式化 layered JSON 在同一目录：
+## 批处理常用参数
+
+常用参数：
+
+- `--file <path>`：要处理的 Lean 文件。
+- `--project-root <path>`：目标 Lake 项目根目录。
+- `--theorem <name>`：只处理指定声明；可以重复传入。
+- `--output-root <path>`：输出根目录，默认是 `<project-root>/output`。
+- `--dataset <name>`：输出 dataset 名，默认是 Lean 文件名去掉 `.lean`。
+- `--english`：生成 `english.layered.json`。
+- `--english-only`：基于已有 formal JSON 生成 English。
+- `--safe`：启用文件锁、内存/进程检查、超时和日志。
+
+安全守卫参数：
+
+- `--safe-max-lean-processes <n>`
+- `--safe-min-available-memory-gb <gb>`
+- `--safe-timeout-seconds <seconds>`
+- `--safe-lock-wait-seconds <seconds>`
+
+English 参数：
+
+- `--english-config <path>`
+- `--english-evidence-mode none|objects|all`
+- `--english-plan-batch-size <n>`
+- `--english-evidence-batch-size <n>`
+- `--english-require-llm`
+
+## 输出结构
+
+生成文件保存在目标项目中：
 
 ```text
+output/<file-stem>/<declaration-name>/manifest.json
+output/<file-stem>/<declaration-name>/<source-hash>/formal.evidence.json
+output/<file-stem>/<declaration-name>/<source-hash>/formal.layered.json
 output/<file-stem>/<declaration-name>/<source-hash>/english.layered.json
 ```
 
-当这个文件存在时，Infoview widget 会启用 Formal/English 切换。本地
-`proofstruct_config.toml` 已被 `.gitignore` 忽略，不应该提交到 GitHub。
+`<source-hash>` 是 normalized declaration source block 的 SHA-256 hash 前 16 位。如果 theorem
+陈述或证明发生变化，hash 也会变化。因此即使 theorem 名字不变，`#proof_blueprint` 也不会误用旧蓝图。
 
 ## 作为本地 Lake Dependency 使用
 
@@ -209,7 +231,7 @@ theorem example_theorem : True := by
 #proof_blueprint example_theorem
 ```
 
-在打开 Infoview 前，需要先在目标项目根目录生成形式化 JSON：
+在目标项目根目录生成 JSON：
 
 ```bash
 conda run --no-capture-output -n proofstruct python /absolute/path/to/ProofStruct/scripts/ProofStruct/batch_extract.py \
@@ -217,30 +239,15 @@ conda run --no-capture-output -n proofstruct python /absolute/path/to/ProofStruc
   --file MyProject/MyFile.lean
 ```
 
-如果还需要可选英文显示层，请先配置 `proofstruct_config.toml`，然后在同一条命令中加入
-`--english`。
-
-## 仓库结构
-
-```text
-ProofStruct/                 Lean library、extractor 和 Infoview command
-scripts/ProofStruct/         Python 批处理和英文生成脚本
-widget/                      Infoview 前端组件
-prompts/                     英文蓝图提示词模板
-examples/                    示例 Lean 文件
-docs/                        开发文档，使用 package 时不是必需
-```
-
-`output/` 下的生成文件不会提交到 GitHub。
-
 ## 常见问题
 
-- 如果 `#proof_blueprint` 报告找不到 JSON，请先运行 `batch_extract.py`。
-- 如果 `#proof_blueprint` 报告当前源码与 manifest 不匹配，请在修改 theorem 后重新运行
-  `batch_extract.py`。
-- 如果第一次构建时意外开始大量编译 mathlib，请检查当前 Lean 配置是否与本 package 兼容。
+- 如果 `#proof_blueprint` 报告找不到 JSON，请先运行 `batch_extract.py`，或者使用
+  `#proof_blueprint!`。
+- 如果当前源码与 manifest 不匹配，请在修改 theorem 后重新运行提取。
+- 如果即时生成找不到 Python，请设置 `PROOFSTRUCT_PYTHON`，或者在 `proofstruct_config.toml`
+  中配置 `[python].executable`。
 - 如果 Infoview 仍然显示旧 widget，可以重启 Lean server 或重新加载 VS Code。
-- 证明蓝图提取可能消耗较多内存，不建议同时并行运行多个蓝图提取任务。
+- 证明蓝图提取可能消耗较多内存，不建议并行运行多个提取任务。
 
 ## 联系方式
 

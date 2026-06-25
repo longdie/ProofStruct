@@ -222,6 +222,81 @@ private def sanitizeBlueprintDisplayCommands (source : String) : String :=
       line
   String.intercalate "\n" ((source.splitOn "\n").map sanitizeLine)
 
+private def isBlueprintDisplayCommandStart (line : String) : Bool :=
+  let t := line.trimAsciiStart.copy
+  t.startsWith "#proof_blueprint"
+
+private def isDeclStartLine (line : String) : Bool :=
+  let t := line.trimAscii.copy
+  t.startsWith "theorem " || t.startsWith "lemma " || t.startsWith "example "
+
+private def declLineMatchesKind (kw theoremName line : String) : Bool :=
+  let t := line.trimAscii.copy
+  let pref := s!"{kw} {theoremName}"
+  t = pref ||
+    t.startsWith (pref ++ " ") ||
+    t.startsWith (pref ++ ":") ||
+    t.startsWith (pref ++ "(") ||
+    t.startsWith (pref ++ "[")
+
+private def declLineMatches (theoremName line : String) : Bool :=
+  declLineMatchesKind "theorem" theoremName line ||
+    declLineMatchesKind "lemma" theoremName line ||
+    declLineMatchesKind "example" theoremName line
+
+private partial def findDeclStart? (theoremName : String) :
+    List String → Nat → Option Nat
+  | [], _ => none
+  | line :: rest, idx =>
+      if declLineMatches theoremName line then
+        some idx
+      else
+        findDeclStart? theoremName rest (idx + 1)
+
+private partial def dropN : Nat → List String → List String
+  | 0, lines => lines
+  | _ + 1, [] => []
+  | n + 1, _ :: rest => dropN n rest
+
+private def startsWithAny (s : String) (prefixes : List String) : Bool :=
+  prefixes.any (fun pref => s.startsWith pref)
+
+private def isLikelyTopLevelCommandStart (line : String) : Bool :=
+  if line.trimAscii.copy = "" then
+    false
+  else if line.trimAsciiStart.copy != line then
+    false
+  else
+    let t := line.trimAscii.copy
+    isBlueprintDisplayCommandStart line ||
+      t.startsWith "@[" ||
+      startsWithAny t [
+        "theorem ", "lemma ", "example", "def ", "abbrev ", "instance ",
+        "class ", "structure ", "inductive ", "coinductive ", "opaque ",
+        "axiom ", "constant ", "variable ", "variables ", "namespace ",
+        "section", "end", "open ", "import ", "set_option ", "attribute ",
+        "initialize", "notation", "infix", "prefix", "postfix", "syntax ",
+        "macro ", "elab ", "command ", "mutual", "noncomputable ",
+        "private ", "protected "
+      ]
+
+private partial def findDeclEndFrom (idx : Nat) : List String → Nat
+  | [] => idx
+  | line :: rest =>
+      if isLikelyTopLevelCommandStart line then
+        idx
+      else
+        findDeclEndFrom (idx + 1) rest
+
+private def sourcePrefixThroughTargetDecl? (source theoremName : String) : Option String :=
+  let lines := source.splitOn "\n"
+  match findDeclStart? theoremName lines 0 with
+  | none => none
+  | some start =>
+      let afterTargetStart := dropN (start + 1) lines
+      let declEnd := findDeclEndFrom (start + 1) afterTargetStart
+      some (String.intercalate "\n" (lines.take declEnd))
+
 private def elaborateSemanticSnapshot (sourceFile source : String)
     (targetTheorem? : Option String := none) :
     IO (Except String SemanticSnapshot) := do
@@ -231,6 +306,11 @@ private def elaborateSemanticSnapshot (sourceFile source : String)
       for msg in messages.toArray do
         rendered := rendered.push (← msg.toString)
       pure (String.intercalate "\n" rendered.toList)
+    let source :=
+      match targetTheorem? with
+      | none => source
+      | some theoremName =>
+          (sourcePrefixThroughTargetDecl? source theoremName).getD source
     let source := sanitizeBlueprintDisplayCommands source
     initSearchPath (← findSysroot)
     unsafe enableInitializersExecution
@@ -1385,18 +1465,34 @@ def enrichBlueprintWithInfo (sourceFile source : String) (bp : Blueprint) :
       let edges := addSemanticInputEdges nodes bp.edges
       pure <| .ok { bp with nodes, edges }
 
+def extractBlueprintFromSemanticSnapshot
+    (sourceFile theoremName : String) (snapshot : SemanticSnapshot) :
+    Except String Blueprint := do
+  match findTheoremCommand? theoremName snapshot with
+  | none => throw s!"theorem command not found in elaborated Syntax: {theoremName}"
+  | some command =>
+      let tactics := minimizeSourceTactics <| snapshot.tactics.filter (fun info =>
+        infoInsideCommand command.startLine command.endLine info.startLine info.endLine)
+      let terms := snapshot.terms.filter (fun info =>
+        infoInsideCommand command.startLine command.endLine info.startLine info.endLine)
+      buildSemanticPrimaryBlueprint sourceFile theoremName command tactics terms
+
 def extractBlueprintSemanticPrimary (sourceFile source theoremName : String) :
     IO (Except String Blueprint) := do
   match ← elaborateSemanticSnapshot sourceFile source (some theoremName) with
   | .error err => pure (.error err)
   | .ok snapshot =>
-      match findTheoremCommand? theoremName snapshot with
-      | none => pure (.error s!"theorem command not found in elaborated Syntax: {theoremName}")
-      | some command =>
-          let tactics := minimizeSourceTactics <| snapshot.tactics.filter (fun info =>
-            infoInsideCommand command.startLine command.endLine info.startLine info.endLine)
-          let terms := snapshot.terms.filter (fun info =>
-            infoInsideCommand command.startLine command.endLine info.startLine info.endLine)
-          pure <| buildSemanticPrimaryBlueprint sourceFile theoremName command tactics terms
+      pure <| extractBlueprintFromSemanticSnapshot sourceFile theoremName snapshot
+
+def extractBlueprintsSemanticPrimary
+    (sourceFile source : String) (theoremNames : Array String) :
+    IO (Except String (Array (String × Except String Blueprint))) := do
+  match ← elaborateSemanticSnapshot sourceFile source none with
+  | .error err => pure (.error err)
+  | .ok snapshot =>
+      let mut out : Array (String × Except String Blueprint) := #[]
+      for theoremName in theoremNames do
+        out := out.push (theoremName, extractBlueprintFromSemanticSnapshot sourceFile theoremName snapshot)
+      pure (.ok out)
 
 end ProofStruct

@@ -38,82 +38,32 @@ private def usage : String :=
   "    --output output/example/fermat_little_theorem_1/formal.layered.json \\\n" ++
   "    --blueprint-output output/example/fermat_little_theorem_1/formal.evidence.json\n"
 
-private def trim (s : String) : String :=
-  s.trimAscii.toString
-
-private def pushUniqueLine (items : Array String) (item : String) : Array String :=
-  let item := trim item
-  if item = "" || items.contains item then items else items.push item
-
-private def sourceImportLines (source : String) : Array String :=
-  (source.splitOn "\n").foldl
-    (fun acc line =>
-      let line := trim line
-      if line.startsWith "import " then pushUniqueLine acc line else acc)
-    #[]
-
-private def semanticLayeredDriverScript
-    (sourceFile theoremName layeredOutputFile blueprintOutputFile source : String) : String :=
-  let imports := sourceImportLines source
-  let importsText :=
-    if imports.isEmpty then "" else String.intercalate "\n" imports.toList ++ "\n"
-  importsText ++
-  "import ProofStruct.Extract.InfoPass\n" ++
-  "import ProofStruct.Extract.Json\n" ++
-  "import ProofStruct.Extract.Layered\n" ++
-  "import ProofStruct.Extract.SyntaxPass\n\n" ++
-  "open ProofStruct\n\n" ++
-  "#eval show IO Unit from do\n" ++
-  s!"  let sourceFile := {jsonStr sourceFile}\n" ++
-  s!"  let theoremName := {jsonStr theoremName}\n" ++
-  s!"  let layeredOutputFile := {jsonStr layeredOutputFile}\n" ++
-  s!"  let blueprintOutputFile := {jsonStr blueprintOutputFile}\n" ++
-  "  let source ← IO.FS.readFile sourceFile\n" ++
-  "  let bp ←\n" ++
-  "    match ← extractBlueprintSemanticPrimary sourceFile source theoremName with\n" ++
-  "    | Except.error err => throw <| IO.userError err\n" ++
-  "    | Except.ok bp => pure bp\n" ++
-  "  IO.FS.writeFile layeredOutputFile (blueprintToLayeredJson bp)\n" ++
-  "  if blueprintOutputFile ≠ \"\" then\n" ++
-  "    IO.FS.writeFile blueprintOutputFile (blueprintToJson bp)\n"
-
-private def removeFileIfExists (path : String) : IO Unit := do
-  try
-    IO.FS.removeFile path
-  catch _ =>
-    pure ()
+private def writeFileWithParents (path content : String) : IO Unit := do
+  match (System.FilePath.mk path).parent with
+  | some parent => IO.FS.createDirAll parent
+  | none => pure ()
+  IO.FS.writeFile path content
 
 private def runSemanticLayeredExtractor
     (sourceFile theoremName layeredOutputFile blueprintOutputFile source : String) :
     IO (Except String Unit) := do
-  let tmpDir := "/tmp/proofstruct"
-  IO.FS.createDirAll tmpDir
-  let stamp ← IO.monoNanosNow
-  let safeName := sanitizeId theoremName
-  let tmpScript := s!"{tmpDir}/semantic_layered_{safeName}_{stamp}.lean"
-  IO.FS.writeFile tmpScript (semanticLayeredDriverScript sourceFile theoremName layeredOutputFile blueprintOutputFile source)
-  try
-    let out ← IO.Process.output {
-      cmd := "lake",
-      args := #["env", "lean", tmpScript]
-    }
-    removeFileIfExists tmpScript
-    if out.exitCode == 0 then
+  match ← extractBlueprintSemanticPrimary sourceFile source theoremName with
+  | .error err =>
+      pure (.error s!"semantic layered extractor failed: {err}")
+  | .ok bp =>
+      writeFileWithParents layeredOutputFile (blueprintToLayeredJson bp)
+      if blueprintOutputFile ≠ "" then
+        writeFileWithParents blueprintOutputFile (blueprintToJson bp)
       pure (.ok ())
-    else
-      pure (.error s!"semantic layered extractor failed with exit code {out.exitCode}\nstdout:\n{out.stdout}\nstderr:\n{out.stderr}")
-  catch err =>
-    removeFileIfExists tmpScript
-    pure (.error s!"semantic layered extractor failed: {err}")
 
 private def writeFallbackOutputs
     (sourceFile theoremName layeredOutputFile blueprintOutputFile source : String) :
     Except String (IO Unit) := do
   let bp ← extractBlueprintFromSource sourceFile source theoremName
   pure do
-    IO.FS.writeFile layeredOutputFile (blueprintToLayeredJson bp)
+    writeFileWithParents layeredOutputFile (blueprintToLayeredJson bp)
     if blueprintOutputFile ≠ "" then
-      IO.FS.writeFile blueprintOutputFile (blueprintToJson bp)
+      writeFileWithParents blueprintOutputFile (blueprintToJson bp)
 
 private def runExtract (cfg : LayeredCliArgs) : IO UInt32 := do
   match cfg.file?, cfg.theorem?, cfg.output? with

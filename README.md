@@ -1,9 +1,8 @@
 # ProofStruct
 
 ProofStruct extracts structured proof blueprints from Lean 4 files and displays them in the Lean
-Infoview.  It is designed for users who want to inspect the high-level plan and fine-grained
-evidence of Lean proofs without modifying the Lean kernel or running expensive extraction inside
-the editor.
+Infoview.  It is designed for users who want to inspect both the high-level proof plan and the
+fine-grained proof evidence of Lean proofs.
 
 Chinese documentation is available in [README.zh.md](README.zh.md).
 
@@ -54,16 +53,9 @@ lake update
 lake build ProofStruct
 ```
 
-## Quick Start: Reproduce the Example
+## Quick Start
 
-The repository contains a sample Lean file:
-
-```text
-examples/example.lean
-```
-
-Generate the formal blueprint JSON files from the terminal.  This default command does not require
-an API key:
+Generate formal blueprint JSON files for the example file:
 
 ```bash
 conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_extract.py \
@@ -71,26 +63,30 @@ conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_ex
   --file examples/example.lean
 ```
 
-Then open [examples/example.lean](examples/example.lean) in VS Code with the Lean extension.  The file
-already imports ProofStruct and contains commands such as:
+Then open [examples/example.lean](examples/example.lean) in VS Code with the Lean extension.  The
+example contains a lemma, two theorems, and the Infoview command:
 
 ```lean
-#proof_blueprint fermat_little_theorem_1
+#proof_blueprint demo_fermat
 ```
 
-After the JSON files exist, the Lean Infoview will display the corresponding proof blueprint.  If
-you also want the optional English display layer, see [Optional English Blueprints](#optional-english-blueprints).
+Put the cursor on the command to view the proof blueprint in the Infoview.
 
-## Generating Blueprints
+## Two Ways to Build Blueprints
 
-The recommended workflow is to process a complete Lean file with the Python batch command.  By
-default, ProofStruct generates only the formal Lean blueprint files:
+### Recommended: terminal batch extraction
+
+The default workflow is to generate JSON from the terminal, then let Infoview read the generated
+files:
 
 ```bash
 conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_extract.py \
   --project-root . \
   --file examples/example.lean
 ```
+
+This is the recommended mode for normal use because it does not run extraction inside the VS Code
+Lean server.
 
 To process a single declaration:
 
@@ -98,66 +94,59 @@ To process a single declaration:
 conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_extract.py \
   --project-root . \
   --file examples/example.lean \
-  --theorem fermat_little_theorem_1
+  --theorem demo_fermat
 ```
 
-For a target project outside this repository, run the script from the target project root:
+### Optional: explicit instant generation from Lean
 
-```bash
-conda run --no-capture-output -n proofstruct python /absolute/path/to/ProofStruct/scripts/ProofStruct/batch_extract.py \
-  --project-root . \
-  --file MyProject/MyFile.lean
-```
-
-The default output layout is:
-
-```text
-output/<file-stem>/<declaration-name>/manifest.json
-output/<file-stem>/<declaration-name>/<source-hash>/formal.evidence.json
-output/<file-stem>/<declaration-name>/<source-hash>/formal.layered.json
-```
-
-`<source-hash>` is the first 16 hex characters of the SHA-256 hash of the normalized declaration
-source block.  If the declaration statement or proof changes, the hash changes as well.  This
-prevents `#proof_blueprint` from showing stale data for a theorem whose name stayed the same.
-
-This default workflow is enough for Infoview visualization.  It does not call an LLM and does not
-require `proofstruct_config.toml` or an API key.
-
-## Infoview Usage
-
-In a Lean file, import ProofStruct and call the command after the declaration:
+ProofStruct also provides explicit bang commands:
 
 ```lean
-import ProofStruct
-
-theorem my_theorem : True := by
-  trivial
-
-#proof_blueprint my_theorem
+#proof_blueprint! demo_fermat
+#proof_blueprint_english! demo_fermat
 ```
 
-`#proof_blueprint` reads:
+These commands call the Python batch script from Lean with safety checks enabled.  They are useful
+when you want to generate a small missing blueprint without leaving the editor.
 
-```text
-output/<file-stem>/<declaration-name>/manifest.json
+Instant generation blocks the Lean command elaboration while it runs.  For Mathlib projects, a
+machine with more than 24GB of memory is recommended.  Avoid running multiple blueprint extraction
+jobs in parallel.
+
+For instant commands, configure the Python executable either through `PROOFSTRUCT_PYTHON` or through
+a local `proofstruct_config.toml`:
+
+```toml
+[python]
+executable = "/absolute/path/to/python"
 ```
 
-It extracts the current declaration source block, matches it against `normalized_source` in the
-manifest, and then loads:
+`proofstruct_config.toml` is local configuration and should not be committed.
 
-```text
-output/<file-stem>/<declaration-name>/<source-hash>/formal.layered.json
+## Infoview Commands
+
+```lean
+#proof_blueprint theorem_name
 ```
 
-If the current source no longer matches the manifest, the command reports an error and asks you to
-rerun the batch extractor.  It will not silently fall back to an older blueprint.
+Reads existing JSON and displays the blueprint.  It never generates missing JSON.
+
+```lean
+#proof_blueprint! theorem_name
+```
+
+Generates the formal blueprint if the current source hash is missing, then displays it.
+
+```lean
+#proof_blueprint_english! theorem_name
+```
+
+Ensures the formal blueprint exists, generates the English blueprint if needed, then displays
+Formal/English views.
 
 ## Optional English Blueprints
 
-ProofStruct can optionally generate an English display layer in addition to the formal Lean
-blueprint.  This feature is disabled by default because it requires an OpenAI-compatible LLM
-endpoint.  Users who only want the formal Lean blueprint can skip this section entirely.
+English blueprints require an OpenAI-compatible LLM endpoint.
 
 Create a local configuration file:
 
@@ -172,7 +161,7 @@ example:
 export PROOFSTRUCT_LLM_API_KEY=<your-api-key>
 ```
 
-Generate formal and English blueprints by adding `--english`:
+Generate formal and English blueprints from the terminal:
 
 ```bash
 conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_extract.py \
@@ -181,14 +170,48 @@ conda run --no-capture-output -n proofstruct python scripts/ProofStruct/batch_ex
   --english
 ```
 
-The generated English file is stored next to the formal layered JSON:
+## Batch Options
+
+Common options:
+
+- `--file <path>`: Lean file to process.
+- `--project-root <path>`: Lake project root.
+- `--theorem <name>`: process one declaration; can be repeated.
+- `--output-root <path>`: output root, defaulting to `<project-root>/output`.
+- `--dataset <name>`: output dataset name, defaulting to the Lean file stem.
+- `--english`: generate `english.layered.json`.
+- `--english-only`: generate English from existing formal JSON.
+- `--safe`: enable lock, memory/process checks, timeout, and logs.
+
+Safety overrides:
+
+- `--safe-max-lean-processes <n>`
+- `--safe-min-available-memory-gb <gb>`
+- `--safe-timeout-seconds <seconds>`
+- `--safe-lock-wait-seconds <seconds>`
+
+English options:
+
+- `--english-config <path>`
+- `--english-evidence-mode none|objects|all`
+- `--english-plan-batch-size <n>`
+- `--english-evidence-batch-size <n>`
+- `--english-require-llm`
+
+## Output Layout
+
+Generated files are written under the target project:
 
 ```text
+output/<file-stem>/<declaration-name>/manifest.json
+output/<file-stem>/<declaration-name>/<source-hash>/formal.evidence.json
+output/<file-stem>/<declaration-name>/<source-hash>/formal.layered.json
 output/<file-stem>/<declaration-name>/<source-hash>/english.layered.json
 ```
 
-When this file exists, the Infoview widget enables Formal/English switching.  The local
-`proofstruct_config.toml` file is ignored by Git and should not be committed.
+`<source-hash>` is the first 16 hex characters of the SHA-256 hash of the normalized declaration
+source block.  If the declaration statement or proof changes, the hash changes as well.  This
+prevents `#proof_blueprint` from showing stale data for a theorem whose name stayed the same.
 
 ## Use as a Local Lake Dependency
 
@@ -219,7 +242,7 @@ theorem example_theorem : True := by
 #proof_blueprint example_theorem
 ```
 
-Before opening the blueprint in the Infoview, generate formal JSON from the target project root:
+Generate JSON from the target project root:
 
 ```bash
 conda run --no-capture-output -n proofstruct python /absolute/path/to/ProofStruct/scripts/ProofStruct/batch_extract.py \
@@ -227,32 +250,15 @@ conda run --no-capture-output -n proofstruct python /absolute/path/to/ProofStruc
   --file MyProject/MyFile.lean
 ```
 
-To also generate the optional English layer, use the same command with `--english` after configuring
-`proofstruct_config.toml`.
-
-## Repository Layout
-
-```text
-ProofStruct/                 Lean library, extractor, and Infoview command
-scripts/ProofStruct/         Python batch extraction and English generation scripts
-widget/                      Infoview front-end component
-prompts/                     Prompt templates for English blueprint generation
-examples/                    Example Lean file
-docs/                        Development notes, not required for package use
-```
-
-Generated files under `output/` are ignored by Git.
-
 ## Troubleshooting
 
-- If `#proof_blueprint` reports that JSON is missing, run `batch_extract.py` first.
-- If `#proof_blueprint` reports that the current source does not match the manifest, rerun
-  `batch_extract.py` after editing the theorem.
-- If the first build is unexpectedly compiling a large part of mathlib, check that your Lean setup is
-  compatible with this package.
+- If `#proof_blueprint` reports that JSON is missing, run `batch_extract.py` first or use
+  `#proof_blueprint!`.
+- If the current source does not match the manifest, rerun extraction after editing the theorem.
+- If instant generation cannot find Python, set `PROOFSTRUCT_PYTHON` or configure
+  `[python].executable` in `proofstruct_config.toml`.
 - If the Infoview still shows an old widget, restart the Lean server or reload VS Code.
-- Blueprint extraction may use substantial memory.  Avoid running multiple blueprint extraction jobs in parallel.
-
+- Blueprint extraction can use substantial memory.  Do not run multiple extraction jobs in parallel.
 
 ## Contact
 
